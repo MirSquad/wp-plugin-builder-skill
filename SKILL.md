@@ -11,6 +11,19 @@ This skill grows with every project — append new discoveries at the end of eve
 
 ---
 
+## Standards this skill is based on
+
+The practices here distil the official WordPress and web standards for building secure, compliant, accessible plugins. When a specific rule is ambiguous, defer to the primary sources:
+
+- **WordPress Plugin Check (PCP)** — <https://wordpress.org/plugins/plugin-check/>
+- **WordPress Coding Standards (WPCS)** — <https://github.com/WordPress/WordPress-Coding-Standards>
+- **PHP_CodeSniffer** — <https://github.com/PHPCSStandards/PHP_CodeSniffer>
+- **WCAG 2 AA (accessibility)** — <https://www.w3.org/WAI/WCAG2AA-Conformance>
+- **OWASP (application security)** — <https://owasp.org/>
+- **WordPress.org Plugin Guidelines** — <https://developer.wordpress.org/plugins/wordpress-org/detailed-plugin-guidelines/>
+
+---
+
 ## Plugin header
 
 Every plugin's main PHP file must begin with this header block. All fields below are either required by WP.org or strongly recommended. Do not omit fields — they affect review, SEO in the directory, and upgrade compatibility.
