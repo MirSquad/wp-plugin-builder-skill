@@ -884,7 +884,7 @@ requestAnimationFrame(function() {
 
 Both `el.offsetTop` and `container.offsetTop` are relative to the same positioned ancestor (the fixed element), so the subtraction gives the element's position within the scroll container. `requestAnimationFrame` ensures the layout is settled before reading the value.
 
-This came up in the AI Site Chat plugin: the chat messages area (`overflow-y: auto`) is inside the chat panel (`position: fixed`). `scrollIntoView({ block: 'start' })` scrolled the page body instead of the messages container. The `offsetTop` approach worked correctly.
+This came up in a chat-widget plugin: the chat messages area (`overflow-y: auto`) is inside the chat panel (`position: fixed`). `scrollIntoView({ block: 'start' })` scrolled the page body instead of the messages container. The `offsetTop` approach worked correctly.
 
 ---
 
@@ -1308,7 +1308,7 @@ To update: append new findings under a clear `## Heading` at the bottom of this 
 
 ## WordPress Abilities API integration
 
-When adding Abilities API support to a plugin, follow these patterns exactly. Learned through building abilities for four plugins (Admin Menu Manager, AI Site Chat, Lighthouse Scanner, LLM Markdown).
+When adding Abilities API support to a plugin, follow these patterns exactly. Learned through building abilities for three production plugins.
 
 ### File structure
 

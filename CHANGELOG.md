@@ -4,6 +4,7 @@ All notable changes to this skill are recorded here. Entries are newest-first.
 
 ## 2026-08-12
 
+- Changed: removed the last named plugins from the skill. The Abilities API section cited four plugins as provenance — one of which no longer exists — and the `scrollIntoView` section named a specific plugin. Both now describe the source generically ("three production plugins", "a chat-widget plugin"); the technical guidance is unchanged, since the names were sourcing rather than instruction.
 - Added: **Settings API** — registering options pages with `register_setting()`, `add_settings_section()`, `add_settings_field()`, and the rules that make the sanitize callback and option group line up.
 - Added: **Cron and scheduled tasks** — scheduling and clearing events, and why cron callbacks must be idempotent and manually triggerable.
 - Added: **Debugging checklist** — quick reference for plugin-won't-load, activation-hook-not-firing, settings-not-saving, and cron-not-running.
