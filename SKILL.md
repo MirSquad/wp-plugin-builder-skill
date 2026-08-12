@@ -24,6 +24,14 @@ The practices here distil the official WordPress and web standards for building 
 
 ---
 
+## Before starting a new plugin or major feature
+
+**Blind spot pass.** Before writing code for a new plugin or a substantial new feature (not small fixes), ask: "What are the unknown unknowns here — WP.org compliance traps, architecture decisions that are hard to reverse later, or patterns I should confirm before committing to an approach?" State this explicitly rather than jumping straight to code, especially for anything touching REST endpoints, custom tables, or a third-party integration you have not built against before.
+
+**Implementation notes.** For any multi-session plugin build, keep a scratch `implementation-notes.md` (gitignored, not one of the five pillar docs) logging deviations from the original plan as they happen — e.g. "switched from transients to user meta because pending state needed to be per-user." Fold anything durable into the relevant pillar doc at wrap-up; anything durable enough to help future plugins goes into this skill file instead.
+
+---
+
 ## Plugin header
 
 Every plugin's main PHP file must begin with this header block. All fields below are either required by WP.org or strongly recommended. Do not omit fields — they affect review, SEO in the directory, and upgrade compatibility.
@@ -278,6 +286,7 @@ $wpdb->delete(
 - `%d` — integer
 - `%s` — string (quoted automatically)
 - `%f` — float
+- `%i` — identifier (table/column name, auto-quoted with backticks) — **WordPress 6.2+ only**. Do not use `%i` unless `Requires at least` is 6.2 or higher. For older targets, whitelist identifiers manually instead of interpolating user input.
 
 **Creating plugin tables on activation:**
 
@@ -299,6 +308,106 @@ function myplugin_create_tables() {
 ```
 
 Use `dbDelta()` — never run `CREATE TABLE` directly. `dbDelta()` handles upgrades safely. Call it from `register_activation_hook` and also on version upgrade checks.
+
+---
+
+## Settings API
+
+Use the WordPress Settings API for plugin options pages. It handles form rendering, saving, and nonce/capability checks when used correctly.
+
+```php
+add_action( 'admin_menu', 'myplugin_add_settings_page' );
+function myplugin_add_settings_page() {
+    add_options_page(
+        __( 'My Plugin Settings', 'my-plugin' ),
+        __( 'My Plugin', 'my-plugin' ),
+        'manage_options',
+        'my-plugin',
+        'myplugin_render_settings_page'
+    );
+}
+
+add_action( 'admin_init', 'myplugin_register_settings' );
+function myplugin_register_settings() {
+    register_setting( 'myplugin_settings_group', 'myplugin_option', [
+        'type'              => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default'           => '',
+    ] );
+
+    add_settings_section(
+        'myplugin_main_section',
+        __( 'General', 'my-plugin' ),
+        '__return_null',
+        'my-plugin'
+    );
+
+    add_settings_field(
+        'myplugin_option_field',
+        __( 'Option Label', 'my-plugin' ),
+        'myplugin_render_option_field',
+        'my-plugin',
+        'myplugin_main_section'
+    );
+}
+
+function myplugin_render_option_field() {
+    $value = get_option( 'myplugin_option', '' );
+    echo '<input type="text" name="myplugin_option" value="' . esc_attr( $value ) . '" class="regular-text">';
+}
+
+function myplugin_render_settings_page() {
+    ?>
+    <div class="wrap">
+        <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
+        <form method="post" action="options.php">
+            <?php
+            settings_fields( 'myplugin_settings_group' );
+            do_settings_sections( 'my-plugin' );
+            submit_button();
+            ?>
+        </form>
+    </div>
+    <?php
+}
+```
+
+**Rules:**
+- Always use `sanitize_callback` in `register_setting()` — it's your input validation layer.
+- The first argument to `settings_fields()` and `register_setting()` must be the same option group string.
+- Capability checks are handled by `add_options_page` (which requires `manage_options`), but if you build a custom save handler instead of using `options.php`, you must check capabilities yourself.
+
+---
+
+## Cron and scheduled tasks
+
+If the plugin schedules WP-Cron events, follow these patterns.
+
+```php
+// Schedule on activation
+function myplugin_activate() {
+    if ( ! wp_next_scheduled( 'myplugin_daily_cleanup' ) ) {
+        wp_schedule_event( time(), 'daily', 'myplugin_daily_cleanup' );
+    }
+}
+
+// Unschedule on deactivation
+function myplugin_deactivate() {
+    wp_clear_scheduled_hook( 'myplugin_daily_cleanup' );
+}
+
+// The callback
+add_action( 'myplugin_daily_cleanup', 'myplugin_run_cleanup' );
+function myplugin_run_cleanup() {
+    // ... cleanup logic ...
+}
+```
+
+**Rules:**
+- **Idempotency is mandatory.** Cron callbacks may run late, may run twice, or may overlap if execution is slow. Write the callback so that running it twice produces the same result as running it once.
+- **Provide a manual trigger path.** Every cron task should be runnable on demand for debugging — either a WP-CLI command or a hidden admin action. If something goes wrong, you need to reproduce it without waiting for the schedule.
+- **Always clear scheduled hooks on deactivation.** An orphaned cron event will fire fatal errors if the plugin is deactivated but the callback no longer exists.
+- **Don't rely on exact timing.** WP-Cron is triggered by page visits, not a real system cron. On low-traffic sites, events may fire hours late.
 
 ---
 
@@ -609,6 +718,36 @@ function myplugin_activate() {
     flush_rewrite_rules();
 }
 ```
+
+---
+
+## Debugging checklist
+
+Quick reference for common "it doesn't work" scenarios.
+
+**Plugin doesn't load / fatal on activation:**
+- Check the PHP error log and enable `WP_DEBUG_LOG` in `wp-config.php`: `define( 'WP_DEBUG_LOG', true );` — errors go to `wp-content/debug.log`.
+- Confirm the plugin header is valid and in the correct main file.
+- Look for syntax errors in any file loaded at boot time (the main file and anything it `require`s).
+
+**Activation hook not firing:**
+- The hook must be registered at top-level scope in the main plugin file — not inside another hook callback, not inside a class method called from a hook.
+- Verify the file path matches: `register_activation_hook( __FILE__, ... )` only works in the main plugin file.
+- On multisite, network activation runs differently — the hook fires once, not per-site.
+
+**Settings not saving:**
+- Confirm `register_setting()` is called (on `admin_init`).
+- Confirm the option group in `register_setting()` matches the group passed to `settings_fields()`.
+- Check capability: does the user have the required capability (usually `manage_options`)?
+- Check nonce: is the form using `settings_fields()` which handles the nonce, or is a custom handler missing nonce verification?
+
+**Security regressions (nonce present but still vulnerable):**
+- Nonces prevent CSRF but don't check authorization. A valid nonce from a subscriber doesn't mean they should have access. Always pair nonce verification with `current_user_can()`.
+
+**Cron task not running:**
+- Confirm the event is scheduled: `wp_next_scheduled( 'myplugin_hook' )` should return a timestamp.
+- WP-Cron depends on page visits. On low-traffic or staging sites, nothing triggers it. Set up a real system cron hitting `wp-cron.php` or test manually.
+- Check that the callback is hooked: `add_action( 'myplugin_hook', 'myplugin_callback' )` must run on every request (not just admin), otherwise the callback won't exist when cron fires.
 
 ---
 
@@ -987,15 +1126,19 @@ Every plugin repo must have a `.gitignore` created at the start. Never let a ses
 .claude/
 *.zip
 analysis/
+archive/
 *-decisions-log.md
 *-handoff.md
 *-project-context.md
 *-session-opener.md
+*-changelog.md
 ```
 
 Use wildcard patterns for the pillar docs: some projects prefix them (e.g. `myplugin-handoff.md`), and a bare `handoff.md` pattern would miss those. The leading `*-` catches both prefixed and unprefixed names.
 
 **Why:** Pillar docs are development context, not source code. Zip files are build artifacts. Neither belongs in version control. If `.gitignore` is missing, pillar docs and zips can end up committed and pushed, exposing internal planning notes publicly.
+
+**A `.gitignore` rule does not untrack files already committed.** If the repo's first commits predate the rule, the ignore does nothing and the docs keep riding along on every push. Verify with `git ls-files | grep -E '\-handoff\.md$|\-decisions-log\.md$'` (or the project's actual naming pattern) and `git rm --cached` anything that matches.
 
 ---
 
@@ -1046,6 +1189,34 @@ zip -r my-plugin/my-plugin-X.X.X.zip my-plugin/my-plugin  # creates double-neste
 ```
 
 Store the zip inside the plugin's own folder, not in the parent plugins folder.
+
+---
+
+## Ship a `.gitattributes` with `export-ignore` in every plugin repo
+
+The release workflow's named asset (`<slug>-X.Y.Z.zip`) is clean, but GitHub also hands out the repo through the green "Code → Download ZIP" button and the auto-generated "Source code (zip/tar.gz)" assets attached to every release. All three are produced by `git archive`, which honours `export-ignore` from `.gitattributes` — so without that file, anyone who grabs a source zip gets `.github/`, `README.md`, `CLAUDE.md`, `.gitignore` and other repo cruft dumped into their plugin directory. This caused a real "fatal error on install" report (a user installed a source zip instead of the release asset).
+
+Add a `.gitattributes` at the repo root marking every non-runtime path `export-ignore`:
+
+```gitattributes
+/.github        export-ignore
+/.gitignore     export-ignore
+/.gitattributes export-ignore
+/README.md      export-ignore
+/CHANGELOG.md   export-ignore
+/CLAUDE.md      export-ignore
+```
+
+Include only the paths that are actually tracked in that repo. Verify before committing:
+
+```bash
+git archive --worktree-attributes --format=zip HEAD | bsdtar -tf - | awk -F/ '{print $1}' | sort -u
+# should list only the plugin's own runtime paths
+```
+
+Two things to remember:
+- **`export-ignore` is not retroactive.** GitHub builds a tag's source archive from that tag's tree, so only tags cut *after* the file exists get clean source archives. Committing to `main` fixes the "Download ZIP" button immediately; to give the latest *release* a clean source archive, cut a packaging-only patch release (version bump with no code change is fine — say so in the changelog).
+- **The named `<slug>-X.Y.Z.zip` release asset is always the recommended install.** For repos where the plugin lives in a subdirectory (the workflow archives `HEAD:<subdir>`), the source zip is now cruft-free but still nests the plugin one level deep, so it isn't directly installable — the named asset is.
 
 ---
 
@@ -1107,6 +1278,12 @@ $posts = get_posts( [
     'fields'         => 'ids',
 ] );
 ```
+
+---
+
+## When in doubt, check the Plugin Handbook
+
+Before inventing a pattern for something WordPress already has an API for, consult the [Plugin Developer Handbook](https://developer.wordpress.org/plugins/). WordPress has built-in solutions for settings pages, cron, privacy exports, custom post types, REST endpoints, and more. Using the canonical approach means fewer surprises on updates and fewer PCP flags on review.
 
 ---
 

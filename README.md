@@ -24,6 +24,9 @@ A [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code/skills) —
 - **Multisite** — `get_site_option`, network capability checks, per-site table prefixes
 - **Privacy (GDPR)** — personal data export and erasure hooks
 - **CDN caching gotchas** — workarounds for managed hosts that ignore `?ver=` cache busters
+- **Settings API** — options pages, sanitize callbacks, and matching option groups
+- **Cron and scheduled tasks** — scheduling, clearing, idempotency, and manual triggers
+- **Debugging checklist** — the usual "it doesn't work" causes and where to look first
 - **Security guards and input normalization** — why a guard must normalize input the same way the code it protects does, including case-insensitive REST route matching and `sanitize_key()` behaviour
 
 ## Changelog
