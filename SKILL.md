@@ -1405,3 +1405,48 @@ echo '<a href="' . $scanner_url . '">';
 $scanner_url = admin_url( '...' );
 echo '<a href="' . esc_url( $scanner_url ) . '">';
 ```
+
+---
+
+## Security guards must normalize input exactly the way the protected code does
+
+A guard that blocks dangerous input is only as good as its agreement with the code downstream of it. If the guard inspects the raw input but the dispatcher normalizes it first, the two disagree — and every value that normalizes *into* a blocked form slips straight through. This is a general class of bug, and two WordPress specifics make it easy to hit.
+
+**1. `sanitize_key()` lowercases *and* strips characters.** It is `strtolower()` followed by `preg_replace( '/[^a-z0-9_\-]/', '', ... )`. So `Force`, `FORCE`, `force ` (trailing space), `f o r c e` and `fo.rce` all normalize to `force`. A check against raw parameter names misses every one of them:
+
+```php
+// WRONG — checks raw keys, dispatches normalized keys.
+if ( array_key_exists( 'force', $body ) ) {
+    return new WP_Error( 'blocked', 'force is blocked.' );
+}
+foreach ( $body as $key => $value ) {
+    $request->set_param( sanitize_key( $key ), $value ); // "Force" arrives as "force"
+}
+
+// CORRECT — normalize once, up front; check and dispatch the same array.
+$body = myplugin_normalize_body( $body ); // sanitize_key() on every key
+if ( array_key_exists( 'force', $body ) ) {
+    return new WP_Error( 'blocked', 'force is blocked.' );
+}
+foreach ( $body as $key => $value ) {
+    $request->set_param( $key, $value );
+}
+```
+
+**2. WordPress matches REST routes case-insensitively.** `WP_REST_Server::match_request_to_handler()` matches with `preg_match( '@^' . $route . '$@i', $path )` — note the `i`. `/wp/v2/Users/5` resolves to exactly the same handler as `/wp/v2/users/5`. Any route pattern in a guard needs the same flag:
+
+```php
+// WRONG — /wp/v2/Users/5 walks past this and still reaches the endpoint.
+if ( preg_match( '#^/wp/v2/users(/|$|\?)#', $route ) ) { ... }
+
+// CORRECT — match the way WordPress itself matches.
+if ( preg_match( '#^/wp/v2/users(/|$|\?)#i', $route ) ) { ... }
+```
+
+Uppercasing the whole namespace works too: the namespace pre-filter in that method uses case-sensitive `str_starts_with()`, so `/WP/V2/USERS` fails it, falls back to scanning every registered route, and the case-insensitive regex matches anyway.
+
+**What does *not* need special handling.** `sanitize_text_field()` strips `%XX` percent-encoded sequences outright, so URL-encoding can't smuggle anything past a check that runs on the sanitized string — provided the guard and the dispatcher both operate on that same sanitized string. And `WP_REST_Request` never splits a query string out of a route, so a `?param=value` suffix in a route doesn't dispatch at all.
+
+**The rule to apply generally:** normalize once, as early as possible, then check and use the same normalized value. Don't apply the transform in two places. A single normalization helper, called before the check, whose output is what actually gets used, makes divergence structurally impossible rather than merely currently-absent.
+
+**Test guards with mutations, not just the canonical spelling.** A guard verified only with the exact input it expects is untested — that is precisely how both bugs above survived an earlier round of live testing that "passed". For every block, assert on casing and padding variants, and assert the allow side too (a `forced` parameter must still be permitted, or the guard is over-blocking). Then **validate the suite by running it against the un-fixed code**: if the tests don't fail there, they aren't testing anything.
